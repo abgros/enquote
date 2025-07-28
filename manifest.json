@@ -9,7 +9,9 @@
 		"webNavigation"
 	],
 	"host_permissions": [
-		"<all_urls>"
+		"https://x.com/*",
+		"https://www.reddit.com/*",
+		"https://archive.ph/*"
 	],
 	"action": {
 		"default_popup": "main.html",
@@ -21,7 +23,6 @@
 	},
 	"background": {
 		"service_worker": "background.js",
-		"scripts": ["background.js"],
 		"type": "module"
 	},
 	"icons": {
