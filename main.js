@@ -11,27 +11,25 @@ function formatDate(dateStr) {
 	return `${day} ${month} ${year}`;
 }
 
-// Clean up passage text by removing extra whitespace
-function formatPassage(passage) {
-	return passage.trim().replace(/\s+/g, " ");
-}
-
-function buildQuote(obj) {
-	const parts = ["#* {{quote-web", "en"];
-
-	for (const [key, value] of Object.entries(obj)) {
-		if (value)
-			parts.push(`${key}=${value}`);
-	}
-
-	return parts.map(part => part
+// Clean up parameter by removing extra whitespace
+function formatPassage(valStr) {
+	return valStr.trim().replace(/\s+/g, " ")
 		.replaceAll("|", "{{!}}")
 		.replaceAll("’", "'")
 		.replaceAll("‘", "'")
 		.replaceAll("”", "\"")
 		.replaceAll("“", "\"")
-		.replaceAll("…", "...")
-	).join("|") + "}}";
+		.replaceAll("…", "...");
+}
+
+function buildQuote(obj, start = "{{quote-web|en|") {
+	const parts = [];
+	for (const [key, value] of Object.entries(obj)) {
+		if (value)
+			parts.push(`${key}=${value}`);
+	}
+
+	return start + parts.join("|") + "}}";
 }
 
 async function getQuote() {
@@ -40,19 +38,27 @@ async function getQuote() {
 	const id = currentTab.id;
 
 	// Match different social media URLs
-	const twitterMatch = url.match(/^https:\/\/x\.com\/([a-zA-Z0-9_]+)\/status\/[0-9]+$/);
-	const redditCommentMatch = url.match(/^https:\/\/www\.reddit\.com\/r\/([a-zA-Z0-9_]+)\/comments\/[a-z0-9]+\/comment\/[a-z0-9]+\/$/);
-	const redditPostMatch = url.match(/^https:\/\/www\.reddit\.com\/r\/([a-zA-Z0-9_]+)\/comments\//);
+	const urlPatterns = {
+		twitter: /^https:\/\/x\.com\/([a-zA-Z0-9_]+)\/status\/[0-9]+$/,
+		redditComment: /^https:\/\/www\.reddit\.com\/r\/([a-zA-Z0-9_]+)\/comments\/[a-z0-9]+\/comment\/[a-z0-9]+\/$/,
+		redditPost: /^https:\/\/www\.reddit\.com\/r\/([a-zA-Z0-9_]+)\/comments\//,
+		nytimes: /^https:\/\/www\.nytimes\.com\/[0-9]{4}\/[0-9]{2}\/[0-9]{2}\//,
+		guardian: /^https:\/\/www\.theguardian\.com\/[a-z]+\/[0-9]{4}\/[a-z]{3}\/[0-9]{2}\//
+	};
 
-	if (!twitterMatch && !redditCommentMatch && !redditPostMatch) {
+	const matches = {};
+	for (let key of Object.keys(urlPatterns))
+		matches[key] = url.match(urlPatterns[key]);
+
+	if (!Object.values(matches).some(match => Boolean(match))) {
 		alert("Invalid URL.");
 		return;
 	}
 
 	const [archiveurl, archivedate] = await archive(currentTab);
 	let quote;
-	if (twitterMatch) {
-		const author = twitterMatch[1];
+	if (matches.twitter) {
+		const author = matches.twitter[1];
 		const date = await runInTab(id, () =>  document.querySelector(`[aria-label*=" · "] > time`).dateTime);
 		const passage = await runInTab(id, () => document.querySelector(`article:has([aria-label*=" · "]) [data-testid="tweetText"]`).textContent);
 
@@ -63,12 +69,12 @@ async function getQuote() {
 			archiveurl,
 			archivedate,
 			date: formatDate(date),
-			passage: formatPassage(passage)
+			passage: formatPassage(passage) || formatPassage(title)
 		});
-	} else if (redditCommentMatch) {
+	} else if (matches.redditComment) {
 		const author = await runInTab(id, () => document.querySelector(".author-name-meta").textContent.trim());
 		const title = await runInTab(id, () => document.querySelector(`[slot="title"]`).textContent.trim());
-		const subreddit = redditCommentMatch[1];
+		const subreddit = matches.redditComment[1];
 		const date = formatDate(await runInTab(id, () => document.querySelector(`[slot="commentMeta"] time`).dateTime));
 		const passage = await runInTab(id, () => document.querySelector(`[slot="comment"] > div`).textContent);
 
@@ -81,12 +87,12 @@ async function getQuote() {
 			archivedate,
 			location: `r/${subreddit}`,
 			date: formatDate(date),
-			passage: formatPassage(passage)
+			passage: formatPassage(passage) || formatPassage(title)
 		});
-	} else if (redditPostMatch) {
+	} else if (matches.redditPost) {
 		const author = await runInTab(id, () => document.querySelector(".author-name").textContent);
 		const title = await runInTab(id, () => document.querySelector(`[slot="title"]`).textContent.trim());
-		const subreddit = redditPostMatch[1];
+		const subreddit = matches.redditPost[1];
 		const date = await runInTab(id, () => document.querySelector("time").dateTime);
 		const passage = await runInTab(id, () => {
 			const postElem = document.querySelector(`[property="schema:articleBody"]`);
@@ -102,8 +108,41 @@ async function getQuote() {
 			archivedate,
 			location: `r/${subreddit}`,
 			date: formatDate(date),
-			passage: formatPassage(passage) || title
+			passage: formatPassage(passage) || formatPassage(title)
 		});
+	} else if (matches.nytimes) {
+		let authorLine = await runInTab(id, () => document.querySelector(`[name="byl"]`).content);
+		if (authorLine.slice(0, 3) == "By ")
+			authorLine = authorLine.slice(3);
+		const authors = authorLine.replaceAll(" and ", "; ").replaceAll(", ", "; ");
+		const title = await runInTab(id, () => document.querySelector("h1").textContent);
+		const date = await runInTab(id, () => document.querySelector(`[property="article:published_time"]`).content.split("T")[0]);
+		const passage = await navigator.clipboard.readText();
+
+		quote = buildQuote({
+			author: authors,
+			title,
+			url,
+			archiveurl,
+			archivedate,
+			date: formatDate(date),
+			passage: formatPassage(passage) || formatPassage(title)
+		}, "{{RQ:NYTimes|");
+	} else if (matches.guardian) {
+		const author = await runInTab(id, () => document.querySelector(`[rel="author"]`).textContent);
+		const title = await runInTab(id, () => document.querySelector("h1").textContent);
+		const date = await runInTab(id, () => document.querySelector(`[property="article:published_time"]`).content.split("T")[0]);
+		const passage = await navigator.clipboard.readText();
+
+		quote = buildQuote({
+			author,
+			title,
+			url,
+			archiveurl,
+			archivedate,
+			date: formatDate(date),
+			passage: formatPassage(passage) || formatPassage(title)
+		}, "{{RQ:Guardian|");
 	}
 
 	await navigator.clipboard.writeText(quote);
