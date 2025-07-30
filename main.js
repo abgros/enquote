@@ -175,7 +175,7 @@ async function getQuote() {
 		]).get(publisher);
 
 		passage = clipboardContents;
-		authors = authors.filter(author => author === publisher);
+		authors = authors.filter(author => author !== publisher);
 
 		quote = buildQuote({
 			...authors.reduce((acc, nextAuthor, index) => {
