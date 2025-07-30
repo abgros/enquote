@@ -1,37 +1,32 @@
-import { runInTab, browserAPI } from "./utils.js";
+import {runInTab, browserAPI} from "./utils.js";
 
-const awaitingTabs = new Map();
+let responseCallback;
 
 browserAPI.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-	// Handle requests to wait for archive URL completion
 	if (msg.type === "wait_for_archiveurl") {
-		awaitingTabs.set(msg.tabId, sendResponse);
-		// Return true to indicate an asynchronous response
-		return true;
+		responseCallback = sendResponse;
+		pollTabUrl(msg.tabId);
+		return true; // for async response
 	}
 });
 
-async function handleArchiveNavigation(details) {
-	const {tabId, url} = details;
-	const match = url.match(/^https:\/\/archive\.ph\/(?:wip\/)?[a-zA-Z0-9]+$/);
-	const responseCallback = awaitingTabs.get(tabId);
+async function pollTabUrl(tabId) {
+	for (let i = 0; i < 100; i++) {
+		const tab = await browserAPI.tabs.get(tabId);
+		const url = tab.url;
 
-	if (match && responseCallback) {
-		// Extract the archive date from the page or get today's date
-		const isoDate = await runInTab(tabId, () => {
-			const timeElem = document.querySelector("#HEADER time");
-			const verboseDate = timeElem ? timeElem.dateTime : new Date().toISOString();
-			return verboseDate.split("T")[0];
-		});
+		if (url.match(/^https:\/\/archive\.ph\/(?:wip\/)?[a-zA-Z0-9]+$/)) {
+			const isoDate = await runInTab(tabId, () => {
+				const timeElem = document.querySelector("#HEADER time");
+				return timeElem ? timeElem.dateTime.split("T")[0] : new Date().toISOString().split("T")[0];
+			});
+			responseCallback({archiveurl: url.replace("wip/", ""), isoDate});
+			return;
+		}
 
-		awaitingTabs.delete(tabId);
-
-		// Send the archive data back to the popup script, remove "wip/" from URL
-		responseCallback({archiveurl: url.replace("wip/", ""), isoDate});
+		// sleep for 100 ms
+		await new Promise(resolve => setTimeout(resolve, 100));
 	}
-}
 
-// Listen for navigation events - both when navigation starts and completes
-// This ensures we catch the archive page whether it loads directly or redirects
-browserAPI.webNavigation.onCommitted.addListener(handleArchiveNavigation);
-browserAPI.webNavigation.onCompleted.addListener(handleArchiveNavigation);
+	responseCallback({archiveurl: "", isoDate: ""});
+}

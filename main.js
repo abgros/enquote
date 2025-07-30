@@ -1,4 +1,4 @@
-import { runInTab, browserAPI } from "./utils.js";
+import {runInTab, browserAPI} from "./utils.js";
 
 const button = document.querySelector("button");
 
@@ -12,7 +12,7 @@ function formatDate(dateStr) {
 }
 
 // Clean up parameter by removing extra whitespace
-function formatPassage(valStr) {
+function formatText(valStr) {
 	return valStr.trim().replace(/\s+/g, " ")
 		.replaceAll("|", "{{!}}")
 		.replaceAll("’", "'")
@@ -22,45 +22,80 @@ function formatPassage(valStr) {
 		.replaceAll("…", "...");
 }
 
-function buildQuote(obj, start = "{{quote-web|en|") {
+function buildQuote(obj, start) {
 	const parts = [];
 	for (const [key, value] of Object.entries(obj)) {
 		if (value)
 			parts.push(`${key}=${value}`);
 	}
 
-	return start + parts.join("|") + "}}";
+	return "#* " + start + parts.join("|") + "}}";
 }
 
 async function getQuote() {
 	const [currentTab] = await browserAPI.tabs.query({active: true, currentWindow: true});
-	const url = currentTab.url.split("?")[0];  // Remove query parameters
+	const url = currentTab.url.split("?")[0]; // Remove query parameters
 	const id = currentTab.id;
 
 	// Match different social media URLs
-	const urlPatterns = {
-		twitter: /^https:\/\/x\.com\/([a-zA-Z0-9_]+)\/status\/[0-9]+$/,
-		redditComment: /^https:\/\/www\.reddit\.com\/r\/([a-zA-Z0-9_]+)\/comments\/[a-z0-9]+\/comment\/[a-z0-9]+\/$/,
-		redditPost: /^https:\/\/www\.reddit\.com\/r\/([a-zA-Z0-9_]+)\/comments\//,
-		nytimes: /^https:\/\/www\.nytimes\.com\/[0-9]{4}\/[0-9]{2}\/[0-9]{2}\//,
-		guardian: /^https:\/\/www\.theguardian\.com\/[a-z]+\/[0-9]{4}\/[a-z]{3}\/[0-9]{2}\//
-	};
+	const urlPatterns = new Map([
+		["Twitter", /^https:\/\/x\.com\/([a-zA-Z0-9_]+)\/status\/[0-9]+$/],
+		["RedditComment", /^https:\/\/www\.reddit\.com\/r\/([a-zA-Z0-9_]+)\/comments\/[a-z0-9]+\/comment\/[a-z0-9]+\/$/],
+		["RedditPost", /^https:\/\/www\.reddit\.com\/r\/([a-zA-Z0-9_]+)\/comments\//]
+	]);
 
-	const matches = {};
-	for (let key of Object.keys(urlPatterns))
-		matches[key] = url.match(urlPatterns[key]);
+	let matchedUrl, matchedUrlObj;
+	for (const [key, regex] of urlPatterns) {
+		const try_match = url.match(regex);
+		if (try_match) {
+			[matchedUrl, matchedUrlObj] = [key, try_match];
+			break;
+		}
+	}
 
-	if (!Object.values(matches).some(match => Boolean(match))) {
-		alert("Invalid URL.");
+	// try to grab JSON-LD data
+	let passage;
+	let [authors, date, title, publisher, gotJsonLD] = await runInTab(id, () => {
+		let gotJsonLD = false;
+		let authors, date, title, publisher;
+
+		for (const script of [...document.querySelectorAll(`script[type="application/ld+json"]`)]) {
+			try {
+				let data = JSON.parse(script.textContent);
+				if (Array.isArray(data))
+					data = data.find(item => item["@type"] === "NewsArticle");
+				console.log("JSON-LD data:", {type: data["@type"], data});
+				if (data["@type"] !== "NewsArticle")
+					continue;
+
+				authors = data.author.name ? [data.author.name] : data.author.map(person => person.name);
+				date = data.datePublished.split("T")[0];
+				title = data.headline;
+				publisher = data.publisher.name;
+				gotJsonLD = true;
+				break;
+			} catch (e) {
+				console.log("JSON-LD parse error:", e.stack);
+			}
+		}
+
+		return [authors, date, title, publisher, gotJsonLD];
+	});
+
+
+	if (!matchedUrl && !gotJsonLD) {
+		alert("Could not extract a quote from this page.");
 		return;
 	}
 
+	const clipboardContents = await navigator.clipboard.readText();
 	const [archiveurl, archivedate] = await archive(currentTab);
+
 	let quote;
-	if (matches.twitter) {
+	if (matchedUrl === "Twitter") {
 		const author = matches.twitter[1];
-		const date = await runInTab(id, () =>  document.querySelector(`[aria-label*=" · "] > time`).dateTime);
-		const passage = await runInTab(id, () => document.querySelector(`article:has([aria-label*=" · "]) [data-testid="tweetText"]`).textContent);
+		date = await runInTab(id, () => document.querySelector(`[aria-label*=" · "] > time`).dateTime);
+		passage = await runInTab(id, () => document.querySelector(`article:has([aria-label*=" · "]) [data-testid="tweetText"]`).textContent);
 
 		quote = buildQuote({
 			author: `@${author}`,
@@ -69,80 +104,92 @@ async function getQuote() {
 			archiveurl,
 			archivedate,
 			date: formatDate(date),
-			passage: formatPassage(passage) || formatPassage(title)
-		});
-	} else if (matches.redditComment) {
+			passage: formatText(passage) || formatText(title)
+		}, "{{quote-web|en|");
+	} else if (matchedUrl === "RedditComment") {
 		const author = await runInTab(id, () => document.querySelector(".author-name-meta").textContent.trim());
-		const title = await runInTab(id, () => document.querySelector(`[slot="title"]`).textContent.trim());
-		const subreddit = matches.redditComment[1];
-		const date = formatDate(await runInTab(id, () => document.querySelector(`[slot="commentMeta"] time`).dateTime));
-		const passage = await runInTab(id, () => document.querySelector(`[slot="comment"] > div`).textContent);
+		title = await runInTab(id, () => document.querySelector(`[slot="title"]`).textContent.trim());
+		date = formatDate(await runInTab(id, () => document.querySelector(`[slot="commentMeta"] time`).dateTime));
+		passage = await runInTab(id, () => document.querySelector(`[slot="comment"] > div`).textContent);
+
+		const subreddit = matchedUrlObj[1];
 
 		quote = buildQuote({
 			author: `u/${author}`,
-			title,
+			title: formatText(title),
 			site: "w:Reddit",
 			url,
 			archiveurl,
 			archivedate,
 			location: `r/${subreddit}`,
 			date: formatDate(date),
-			passage: formatPassage(passage) || formatPassage(title)
-		});
-	} else if (matches.redditPost) {
+			passage: formatText(passage) || formatText(title)
+		}, "{{quote-web|en|");
+	} else if (matchedUrl === "RedditPost") {
 		const author = await runInTab(id, () => document.querySelector(".author-name").textContent);
-		const title = await runInTab(id, () => document.querySelector(`[slot="title"]`).textContent.trim());
-		const subreddit = matches.redditPost[1];
-		const date = await runInTab(id, () => document.querySelector("time").dateTime);
-		const passage = await runInTab(id, () => {
+		title = await runInTab(id, () => document.querySelector(`[slot="title"]`).textContent.trim());
+		date = await runInTab(id, () => document.querySelector("time").dateTime);
+		passage = await runInTab(id, () => {
 			const postElem = document.querySelector(`[property="schema:articleBody"]`);
 			return postElem ? postElem.textContent : "";
 		});
 
+		const subreddit = matchedUrlObj[1];
+
 		quote = buildQuote({
 			author: `u/${author}`,
-			title,
+			title: formatText(title),
 			site: "w:Reddit",
 			url,
 			archiveurl,
 			archivedate,
 			location: `r/${subreddit}`,
 			date: formatDate(date),
-			passage: formatPassage(passage) || formatPassage(title)
-		});
-	} else if (matches.nytimes) {
-		let authorLine = await runInTab(id, () => document.querySelector(`[name="byl"]`).content);
-		if (authorLine.slice(0, 3) == "By ")
-			authorLine = authorLine.slice(3);
-		const authors = authorLine.replaceAll(" and ", "; ").replaceAll(", ", "; ");
-		const title = await runInTab(id, () => document.querySelector("h1").textContent);
-		const date = await runInTab(id, () => document.querySelector(`[property="article:published_time"]`).content.split("T")[0]);
-		const passage = await navigator.clipboard.readText();
+			passage: formatText(passage) || formatText(title)
+		}, "{{quote-web|en|");
+	} else {
+		const rq = new Map([
+			["Daily Mail", "Daily Mail"],
+			["The Economist", "Economist"],
+			["Financial Times", "FT"],
+			["The Globe and Mail", "G&M"],
+			["The Guardian", "Guardian"],
+			["The Independent", "Independent"],
+			["Intelligencer", "New York"],
+			["Los Angeles Times", "LATimes"],
+			["National Post", "National Post"],
+			["The New York Times", "NYT"],
+			["The New Yorker", "New Yorker"],
+			["New York Post", "NYPost"],
+			["Rolling Stone", "Rolling Stone"],
+			["Scientific American", "SciAm"],
+			["Slate", "Slate"],
+			["The Strategist", "New York"],
+			["The Telegraph", "Telegraph"],
+			["Time", "Time"],
+			["The Times", "Times"],
+			["Vanity Fair", "Vanity Fair"],
+			["The Wall Street Journal", "WSJ"],
+			["The Washington Post", "WaPo"],
+			["WIRED", "Wired"],
+		]).get(publisher);
+
+		passage = clipboardContents;
+		authors = authors.filter(author => author === publisher);
 
 		quote = buildQuote({
-			author: authors,
-			title,
+			...authors.reduce((acc, nextAuthor, index) => {
+				index === 0 ? (acc.author = nextAuthor) : (acc[`author${index + 1}`] = nextAuthor);
+				return acc;
+			}, {}),
+			title: formatText(title),
+			...(!rq && {site: publisher}),
 			url,
 			archiveurl,
 			archivedate,
 			date: formatDate(date),
-			passage: formatPassage(passage) || formatPassage(title)
-		}, "{{RQ:NYTimes|");
-	} else if (matches.guardian) {
-		const author = await runInTab(id, () => document.querySelector(`[rel="author"]`).textContent);
-		const title = await runInTab(id, () => document.querySelector("h1").textContent);
-		const date = await runInTab(id, () => document.querySelector(`[property="article:published_time"]`).content.split("T")[0]);
-		const passage = await navigator.clipboard.readText();
-
-		quote = buildQuote({
-			author,
-			title,
-			url,
-			archiveurl,
-			archivedate,
-			date: formatDate(date),
-			passage: formatPassage(passage) || formatPassage(title)
-		}, "{{RQ:Guardian|");
+			passage: formatText(passage) || formatText(title)
+		}, rq ? `{{RQ:${rq}|` : "{{quote-web|en|");
 	}
 
 	await navigator.clipboard.writeText(quote);
@@ -159,6 +206,7 @@ async function archive(currentTab) {
 
 	// Wait for the tab to redirect to its final archiveurl, then close it
 	const archiveResult = await browserAPI.runtime.sendMessage({type: "wait_for_archiveurl", tabId: tab.id});
+	console.log("Now closing tab");
 	await browserAPI.tabs.remove(tab.id);
 
 	const {archiveurl, isoDate} = archiveResult;
