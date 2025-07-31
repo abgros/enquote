@@ -11,9 +11,11 @@ function formatDate(dateStr) {
 	return `${day} ${month} ${year}`;
 }
 
-// Clean up parameter by removing extra whitespace
+// Make sure text is on one line with characters normalized
 function formatText(valStr) {
-	return valStr.trim().replace(/\s+/g, " ")
+	return valStr.trim()
+		.replace(/[\n\r]+/g, " ¶ ")
+		.replace(/\s+/g, " ")
 		.replaceAll("|", "{{!}}")
 		.replaceAll("’", "'")
 		.replaceAll("‘", "'")
@@ -59,19 +61,36 @@ async function getQuote() {
 		let gotJsonLD = false;
 		let authors, date, title, publisher;
 
+		const newsTypes = ["NewsArticle", "ReportageNewsArticle", "Article"];
+		const jsonLdIsArticle = data => {
+			let typeStr = Array.isArray(data["@type"]) ? data["@type"][0] : data["@type"];
+			return newsTypes.includes(typeStr);
+		};
+
 		for (const script of [...document.querySelectorAll(`script[type="application/ld+json"]`)]) {
 			try {
 				let data = JSON.parse(script.textContent);
 				if (Array.isArray(data))
-					data = data.find(item => item["@type"] === "NewsArticle");
-				console.log("JSON-LD data:", {type: data["@type"], data});
-				if (data["@type"] !== "NewsArticle")
+					data = data.find(jsonLdIsArticle);
+
+				console.log("JSON-LD data:", data);
+
+				// ensure @type value is correct
+				if (!jsonLdIsArticle(data))
 					continue;
 
-				authors = data.author.name ? [data.author.name] : data.author.map(person => person.name);
+				if (typeof data.author === "string")
+					authors = [data.author];
+				else if (typeof data.author.name === "string")
+					authors = [data.author.name];
+				else if (Array.isArray(data.author))
+					authors = data.author.map(person => person.name);
+				else
+					continue;
+
 				date = data.datePublished.split("T")[0];
 				title = data.headline;
-				publisher = data.publisher.name;
+				publisher = data.publisher.name || data.publisher["@id"];
 				gotJsonLD = true;
 				break;
 			} catch (e) {
@@ -149,6 +168,7 @@ async function getQuote() {
 		}, "{{quote-web|en|");
 	} else {
 		const rq = new Map([
+			["https://www.theatlantic.com/#publisher", "Atlantic"],
 			["Daily Mail", "Daily Mail"],
 			["The Economist", "Economist"],
 			["Financial Times", "FT"],
@@ -206,7 +226,6 @@ async function archive(currentTab) {
 
 	// Wait for the tab to redirect to its final archiveurl, then close it
 	const archiveResult = await browserAPI.runtime.sendMessage({type: "wait_for_archiveurl", tabId: tab.id});
-	console.log("Now closing tab");
 	await browserAPI.tabs.remove(tab.id);
 
 	const {archiveurl, isoDate} = archiveResult;
