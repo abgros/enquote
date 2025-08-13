@@ -24,3 +24,9 @@ You can install it on the Chrome web store [here](https://chromewebstore.google.
 2. Go to `about:debugging` -> "This Firefox"
 3. Click "Load Temporary Add-on"
 4. Select `manifest.json`
+
+## Compilation steps
+This prepares the extension to be uploaded for the Chrome and Firefox web stores.
+
+1. Run compile.py
+2. Observe that two zip files have been generated: enquote.zip and enquote-firefox.zip.
