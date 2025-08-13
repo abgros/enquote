@@ -2,6 +2,23 @@ import {runInTab, browserAPI} from "./utils.js";
 
 const button = document.querySelector("button");
 
+// https://apastyle.apa.org/style-grammar-guidelines/capitalization/title-case
+const alwaysLower = ["and", "as", "but", "for", "if", "nor", "or", "so", "yet", "a", "an",
+	"the", "as", "at", "by", "for", "in", "of", "off", "on", "per", "to", "up", "via"];
+
+function titleCase(s) {
+	const parts = s.split(/\b/);
+	for (let i = 0; i < parts.length; i++) {
+		const isLowerCase = /^[a-z]{2,}$/.test(parts[i]);
+		// words in alwaysLower are exempt unless they are the first part
+		if (isLowerCase && (!alwaysLower.includes(parts[i]) || parts === 0)) {
+			parts[i] = parts[i].at(0).toUpperCase() + parts[i].substr(1);
+		}
+	}
+
+	return parts.join("");
+}
+
 // Format date as "DD Month YYYY" (e.g., "15 January 2024")
 function formatDate(dateStr) {
 	const date = new Date(dateStr);
@@ -14,7 +31,7 @@ function formatDate(dateStr) {
 // Make sure text is on one line with characters normalized
 function formatText(valStr) {
 	return valStr.trim()
-		.replace(/[\n\r]+/g, " ¶ ")
+		.replace(/\n\s+/g, " ¶ ")
 		.replace(/\s+/g, " ")
 		.replaceAll("|", "{{!}}")
 		.replaceAll("’", "'")
@@ -22,6 +39,21 @@ function formatText(valStr) {
 		.replaceAll("”", "\"")
 		.replaceAll("“", "\"")
 		.replaceAll("…", "...");
+}
+
+// Takes an array of authors and returns an object of author parameters
+function consolidateAuthors(authors) {
+	if (!Array.isArray(authors))
+		return {};
+
+	return authors.reduce((acc, next, i) => {
+		if (i === 0)
+			acc["author"] = next;
+		else
+			acc[`author${i + 1}`] = next;
+
+		return acc;
+	}, {});
 }
 
 function buildQuote(obj, start) {
@@ -37,13 +69,17 @@ function buildQuote(obj, start) {
 async function getQuote() {
 	const [currentTab] = await browserAPI.tabs.query({active: true, currentWindow: true});
 	const url = currentTab.url.split("?")[0]; // Remove query parameters
+	const urlQuery = new URLSearchParams(currentTab.url);
 	const id = currentTab.id;
+	const clipboardContents = await navigator.clipboard.readText();
 
 	// Match different social media URLs
 	const urlPatterns = new Map([
 		["Twitter", /^https:\/\/x\.com\/([a-zA-Z0-9_]+)\/status\/[0-9]+$/],
 		["RedditComment", /^https:\/\/www\.reddit\.com\/r\/([a-zA-Z0-9_]+)\/comments\/[a-z0-9]+\/comment\/[a-z0-9]+\/$/],
-		["RedditPost", /^https:\/\/www\.reddit\.com\/r\/([a-zA-Z0-9_]+)\/comments\//]
+		["RedditPost", /^https:\/\/www\.reddit\.com\/r\/([a-zA-Z0-9_]+)\/comments\//],
+		["InternetArchiveItem", /^https:\/\/archive\.org\/details\//],
+		["GoogleBooks", /^https:\/\/www\.google\.[a-z]+\/books\/edition\/[^/]+\/([a-zA-Z0-9-_]+)/]
 	]);
 
 	let matchedUrl, matchedUrlObj;
@@ -53,6 +89,83 @@ async function getQuote() {
 			[matchedUrl, matchedUrlObj] = [key, try_match];
 			break;
 		}
+	}
+
+	// try to grab archive.org or google book
+	if (matchedUrl === "InternetArchiveItem") {
+		let isBook = await runInTab(id, () => document.querySelector(`[property="mediatype"]`).content);
+		if (isBook !== "texts") {
+			alert("This archive.org item is not a text item.");
+			return;
+		}
+		const data = await runInTab(id, () => JSON.parse(document.querySelector(".js-ia-metadata").value));
+		let {identifier, title, year, date, publisher, creator, isbn} = data.metadata;
+		publisher = publisher ?? "";
+		isbn = Array.isArray(isbn) ? isbn[0] : isbn;
+
+		// try to extract page parameters
+		const page = url.match(/\/page\/(n?[0-9]+)\/mode\//)?.[1] ?? await runInTab(id, () => {
+			// IA uses a lot of shadow roots
+			const getRoots = e => [e, ...e.querySelectorAll("*")].filter(e => e.shadowRoot).flatMap(e => [e.shadowRoot, ...getRoots(e.shadowRoot)]);
+			const pageNum = getRoots(document).flatMap(r => [...r.querySelectorAll(".page-num")])[0];
+			return pageNum.textContent.replace("Page ", "");
+		});
+
+		const pageurl = page ? `https://archive.org/details/${identifier}/page/${page}/mode/1up` : "";
+
+		const [locationPart, publisherPart] = publisher.includes(" : ") ? publisher.split(" : ") : ["", publisher];
+		const urlParam = `https://archive.org/details/${identifier}/`;
+
+		return buildQuote({
+			author: creator,
+			year: year ?? date.match(/[0-9]{4}/)[0],
+			title: formatText(titleCase(title).replaceAll(" : ", ": ")),
+			location: locationPart,
+			publisher: publisherPart,
+			url: urlParam,
+			page: page.startsWith("n") ? "unnumbered" : page,
+			pageurl,
+			isbn,
+			passage: formatText(clipboardContents) || formatText(title)
+		}, "{{quote-book|en|");
+	} else if (matchedUrl === "GoogleBooks") {
+		// call into the Google Books API
+		const volumeId = matchedUrlObj[1];
+		const apiUrl = `https://www.googleapis.com/books/v1/volumes/${volumeId}`;
+		const data = await fetch(apiUrl).then(resp => resp.json());
+
+		const {authors, title, publishedDate, publisher, industryIdentifiers, subtitle} = data.volumeInfo;
+		const fullTitle = subtitle ? `${title}: ${subtitle}` : title;
+		console.log(data.volumeInfo);
+
+		let isbn;
+		if (industryIdentifiers) {
+			const isbn13 = industryIdentifiers.find(ident => ident.type === "ISBN_13");
+			if (isbn13) {
+				isbn = isbn13.identifier;
+			} else {
+				const isbn10 = industryIdentifiers.find(ident => ident.type === "ISBN_10");
+				isbn = isbn10 ? isbn10.identifier : "";
+			}
+		}
+
+		const pageParam = urlQuery.get("pg") ?? "";
+		const page = pageParam.match(/\d+/) ? pageParam.match(/\d+/)[0] : "";
+		const urlParam = `https://books.google.com/books?id=${volumeId}`;
+		const pageurl = pageParam ? `${urlParam}&pg=${pageParam}` : "";
+
+		return buildQuote({
+			...consolidateAuthors(authors),
+			year: publishedDate.match(/[0-9]{4}/)[0],
+			title: fullTitle,
+			location: "",
+			publisher,
+			url: urlParam,
+			page,
+			pageurl,
+			isbn,
+			passage: formatText(clipboardContents) || formatText(title)
+		}, "{{quote-book|en|");
 	}
 
 	// try to grab JSON-LD data
@@ -102,21 +215,16 @@ async function getQuote() {
 	});
 
 
-	if (!matchedUrl && !gotJsonLD) {
-		alert("Could not extract a quote from this page.");
-		return;
-	}
+	if (!matchedUrl && !gotJsonLD) return;
 
-	const clipboardContents = await navigator.clipboard.readText();
 	const [archiveurl, archivedate] = await archive(currentTab);
 
-	let quote;
 	if (matchedUrl === "Twitter") {
-		const author = matches.twitter[1];
+		const author = matchedUrlObj[1];
 		date = await runInTab(id, () => document.querySelector(`[aria-label*=" · "] > time`).dateTime);
 		passage = await runInTab(id, () => document.querySelector(`article:has([aria-label*=" · "]) [data-testid="tweetText"]`).textContent);
 
-		quote = buildQuote({
+		return buildQuote({
 			author: `@${author}`,
 			site: "w:Twitter",
 			url,
@@ -133,8 +241,8 @@ async function getQuote() {
 
 		const subreddit = matchedUrlObj[1];
 
-		quote = buildQuote({
-			author: `u/${author}`,
+		return buildQuote({
+			...(author !== "[deleted]" && {author: `u/${author}`}),
 			title: formatText(title),
 			site: "w:Reddit",
 			url,
@@ -142,7 +250,7 @@ async function getQuote() {
 			archivedate,
 			location: `r/${subreddit}`,
 			date: formatDate(date),
-			passage: formatText(passage) || formatText(title)
+			passage: formatText(clipboardContents) || formatText(passage) || formatText(title)
 		}, "{{quote-web|en|");
 	} else if (matchedUrl === "RedditPost") {
 		const author = await runInTab(id, () => document.querySelector(".author-name").textContent);
@@ -155,8 +263,8 @@ async function getQuote() {
 
 		const subreddit = matchedUrlObj[1];
 
-		quote = buildQuote({
-			author: `u/${author}`,
+		return buildQuote({
+			...(author !== "[deleted]" && {author: `u/${author}`}),
 			title: formatText(title),
 			site: "w:Reddit",
 			url,
@@ -164,7 +272,7 @@ async function getQuote() {
 			archivedate,
 			location: `r/${subreddit}`,
 			date: formatDate(date),
-			passage: formatText(passage) || formatText(title)
+			passage: formatText(clipboardContents) || formatText(passage) || formatText(title)
 		}, "{{quote-web|en|");
 	} else {
 		const rq = new Map([
@@ -194,26 +302,19 @@ async function getQuote() {
 			["WIRED", "Wired"],
 		]).get(publisher);
 
-		passage = clipboardContents;
 		authors = authors.filter(author => author !== publisher);
 
-		quote = buildQuote({
-			...authors.reduce((acc, nextAuthor, index) => {
-				index === 0 ? (acc.author = nextAuthor) : (acc[`author${index + 1}`] = nextAuthor);
-				return acc;
-			}, {}),
+		return buildQuote({
+			...consolidateAuthors(authors),
 			title: formatText(title),
 			...(!rq && {site: publisher}),
 			url,
 			archiveurl,
 			archivedate,
 			date: formatDate(date),
-			passage: formatText(passage) || formatText(title)
+			passage: formatText(clipboardContents) || formatText(title)
 		}, rq ? `{{RQ:${rq}|` : "{{quote-web|en|");
 	}
-
-	await navigator.clipboard.writeText(quote);
-	button.textContent = "Copied!";
 }
 
 // Archive the current page and return archive URL and date
@@ -236,7 +337,13 @@ async function archive(currentTab) {
 
 button.addEventListener("click", async () => {
 	try {
-		await getQuote();
+		const quote = await getQuote();
+		if (quote) {
+			await navigator.clipboard.writeText(quote);
+			button.textContent = "Copied!";
+		} else {
+			alert("Could not extract a quote from this page.");
+		}
 	} catch (err) {
 		console.error(err);
 		alert(`An error occurred:\n${err.stack}`);
