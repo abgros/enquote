@@ -222,7 +222,7 @@ async function getQuote() {
 	if (matchedUrl === "Twitter") {
 		const author = matchedUrlObj[1];
 		date = await runInTab(id, () => document.querySelector(`[aria-label*=" · "] > time`).dateTime);
-		passage = await runInTab(id, () => document.querySelector(`article:has([aria-label*=" · "]) [data-testid="tweetText"]`).textContent);
+		passage = await runInTab(id, () => document.querySelector(`article:has([aria-label*=" · "]) [data-testid="tweetText"]`)?.textContent ?? "");
 
 		return buildQuote({
 			author: `@${author}`,
@@ -231,7 +231,7 @@ async function getQuote() {
 			archiveurl,
 			archivedate,
 			date: formatDate(date),
-			passage: formatText(passage) || formatText(title)
+			passage: formatText(passage)
 		}, "{{quote-web|en|");
 	} else if (matchedUrl === "RedditComment") {
 		const author = await runInTab(id, () => document.querySelector(".author-name-meta").textContent.trim());

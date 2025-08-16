@@ -1,16 +1,17 @@
 # Enquote - Wiktionary Quote Generator
 
-A browser extension that generates Wiktionary quotes from certain social media and news sites.
+A browser extension that generates Wiktionary quotes from certain social media sites, news sites, archive.org books, and Google Books items.
 
 You can install it on the Chrome web store [here](https://chromewebstore.google.com/detail/enquote/hleooaeilbhgminhijkkdkfllibkheko).
 
 ## Usage
 
-1. Go to a tweet or Reddit post, or news article
-2. If on a news article, make sure you have the passage copied to your clipboard
+1. Go to a tweet, Reddit post, news article, archive.org book, or Google Books item
+2. Make sure you have the passage copied to your clipboard (not necessary if you're doing Twitter)
 3. Click the extension icon
-4. Click "Quote" - formatted quote copied to clipboard
-5. Paste into Wiktionary
+4. Click "Quote"
+5. Wait for the button to say "Copied!"
+6. Paste into Wiktionary
 
 ## Manual installation steps
 
