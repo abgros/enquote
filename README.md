@@ -23,6 +23,9 @@ You can install it on the Chrome web store [here](https://chromewebstore.google.
 6. Paste into Wiktionary
 
 ## Manual installation steps
+Publishing an update to the Chrome or Firefox web stores can take several days, so it may be behind
+the latest development version in terms of bug fixes and features. You can download the extension
+directly from Github [here](https://github.com/abgros/enquote/archive/refs/heads/master.zip); unzip the folder and install it as described below:
 
 **Chrome:**
 1. Go to `chrome://extensions/`
@@ -30,9 +33,9 @@ You can install it on the Chrome web store [here](https://chromewebstore.google.
 3. Click "Load unpacked" and select this folder
 
 **Firefox:**
-1. Copy the contents of `manifest-firefox.json` into `manifest.json`
+1. Copy the contents of `manifest-firefox.json` into `manifest.json` within this folder
 2. Go to `about:debugging` -> "This Firefox"
-3. Click "Load Temporary Add-on"
+3. Click "Load Temporary Add-on..."
 4. Select `manifest.json`
 
 ## Compilation steps
