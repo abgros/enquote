@@ -1,7 +1,5 @@
 import {runInTab, browserAPI} from "./utils.js";
 
-const button = document.querySelector("button");
-
 // https://apastyle.apa.org/style-grammar-guidelines/capitalization/title-case
 const alwaysLower = ["and", "as", "but", "for", "if", "nor", "or", "so", "yet", "a", "an",
 	"the", "as", "at", "by", "for", "in", "of", "off", "on", "per", "to", "up", "via"];
@@ -29,8 +27,8 @@ function formatDate(dateStr) {
 }
 
 // Make sure text is on one line with characters normalized
-function formatText(valStr) {
-	return valStr.trim()
+function formatText(str) {
+	return str.trim()
 		.replace(/\n\s+/g, " ¶ ")
 		.replace(/\s+/g, " ")
 		.replaceAll("|", "{{!}}")
@@ -68,8 +66,9 @@ function buildQuote(obj, start) {
 
 async function getQuote() {
 	const [currentTab] = await browserAPI.tabs.query({active: true, currentWindow: true});
-	const url = currentTab.url.split("?")[0]; // Remove query parameters
-	const urlQuery = new URLSearchParams(currentTab.url);
+	const url = currentTab.url;
+	const cleanUrl = url.split("?")[0]; // Remove query parameters
+	const urlQuery = new URLSearchParams(url);
 	const id = currentTab.id;
 	const clipboardContents = await navigator.clipboard.readText();
 
@@ -79,12 +78,14 @@ async function getQuote() {
 		["RedditComment", /^https:\/\/www\.reddit\.com\/r\/([a-zA-Z0-9_]+)\/comments\/[a-z0-9]+\/comment\/[a-z0-9]+\/$/],
 		["RedditPost", /^https:\/\/www\.reddit\.com\/r\/([a-zA-Z0-9_]+)\/comments\//],
 		["InternetArchiveItem", /^https:\/\/archive\.org\/details\//],
-		["GoogleBooks", /^https:\/\/www\.google\.[a-z]+\/books\/edition\/[^/]+\/([a-zA-Z0-9-_]+)/]
+		["GoogleBooks", /^https:\/\/www\.google\.[a-z]+\/books\/edition\/[^/]+\/([a-zA-Z0-9-_]+)/],
+		["NationalCorpusOfPolish", /^https:\/\/nkjp\.pl\/poliqarp\/[a-z0-9-]+\/query\/\d+\/$/],
+		["Polona", /^https:\/\/polona\.pl\/(?:preview|item-view)\/([^/]+)/]
 	]);
 
 	let matchedUrl, matchedUrlObj;
 	for (const [key, regex] of urlPatterns) {
-		const try_match = url.match(regex);
+		const try_match = cleanUrl.match(regex);
 		if (try_match) {
 			[matchedUrl, matchedUrlObj] = [key, try_match];
 			break;
@@ -104,7 +105,7 @@ async function getQuote() {
 		isbn = Array.isArray(isbn) ? isbn[0] : isbn;
 
 		// try to extract page parameters
-		const page = url.match(/\/page\/(n?[0-9]+)\/mode\//)?.[1] ?? await runInTab(id, () => {
+		const page = cleanUrl.match(/\/page\/(n?[0-9]+)\/mode\//)?.[1] ?? await runInTab(id, () => {
 			// IA uses a lot of shadow roots
 			const getRoots = e => [e, ...e.querySelectorAll("*")].filter(e => e.shadowRoot).flatMap(e => [e.shadowRoot, ...getRoots(e.shadowRoot)]);
 			const pageNum = getRoots(document).flatMap(r => [...r.querySelectorAll(".page-num")])[0];
@@ -127,7 +128,7 @@ async function getQuote() {
 			pageurl,
 			isbn,
 			passage: formatText(clipboardContents) || formatText(title)
-		}, "{{quote-book|en|");
+		}, `{{quote-book|${langcode || "en"}|`);
 	} else if (matchedUrl === "GoogleBooks") {
 		// call into the Google Books API
 		const volumeId = matchedUrlObj[1];
@@ -165,7 +166,54 @@ async function getQuote() {
 			pageurl,
 			isbn,
 			passage: formatText(clipboardContents) || formatText(title)
-		}, "{{quote-book|en|");
+		}, `{{quote-book|${langcode || "en"}|`);
+	} else if (matchedUrl === "NationalCorpusOfPolish") {
+		const passage = await runInTab(id, () => document.querySelector(`#result-context`).textContent);
+		const metadata = await runInTab(id, () => Object.fromEntries(
+			[...document.querySelectorAll(".result-metadata dt")].map(elem => [elem.textContent, elem.nextElementSibling.textContent])
+		));
+		const quoteKind = metadata["channel"] === "book" ? "book" : metadata["publisher"] === "Usenet" ? "usenet" : "journal";
+		const rawDate = (metadata["published"] || metadata["date"]).split(";")[0];
+
+		return buildQuote({
+			...consolidateAuthors(metadata["author"].split("; ")),
+			title: metadata["title"],
+			location: metadata["publication place"],
+			publisher: metadata["publisher"],
+			...(rawDate.match("^[0-9]{4}$") ? {year: rawDate} : {date: rawDate}),
+			issn: metadata["ISSN"],
+			isbn: metadata["ISBN"],
+			passage: `{{...}} ${formatText(passage)} {{...}}`,
+		}, `{{quote-${quoteKind}|${langcode || "en"}|`);
+	} else if (matchedUrl === "Polona") {
+		const workId = matchedUrlObj[1];
+
+		// janky hack to open the Informacje tab
+		if (url.includes("item-view") && await runInTab(id, () => !document.querySelector(".metadata-info-container-scroll"))) {
+			await runInTab(id, () => document.querySelector(`[aria-label="Informacje"]`).click());
+		}
+
+		const metadata = await runInTab(id, () => Object.fromEntries(
+			[...document.querySelectorAll("bn-object-metadata-item")].map(elem => {
+				let divs = elem.querySelectorAll("div");
+				return [divs[1].textContent.trim(), divs[2].textContent.trim()];
+			})
+		));
+		const title = await runInTab(id, () => document.querySelector(".title-section h2, h5").textContent);
+		const date = await runInTab(id, () => document.querySelector("h2 + div, h5 + h6").textContent);
+		const page = await runInTab(id, () => document.querySelector("bn-viewer-page-select")?.textContent.match("karta \\[?([^|\\]]+)")[1].trim());
+
+		return buildQuote({
+			author: metadata["Autor"].split("(")[0].trim(),
+			title: formatText(title),
+			date,
+			location: metadata["Miejsce wydania"],
+			publisher: metadata["Wydawca"],
+			url: `https://polona.pl/preview/${workId}`,
+			page: page,
+			pageurl: page && url,
+			passage: formatText(clipboardContents) || formatText(title)
+		}, "{{quote-book|pl|");
 	}
 
 	// try to grab JSON-LD data
@@ -227,12 +275,12 @@ async function getQuote() {
 		return buildQuote({
 			author: `@${author}`,
 			site: "w:Twitter",
-			url,
+			url: cleanUrl,
 			archiveurl,
 			archivedate,
 			date: formatDate(date),
 			passage: formatText(passage)
-		}, "{{quote-web|en|");
+		}, `{{quote-book|${langcode || "en"}|`);
 	} else if (matchedUrl === "RedditComment") {
 		const author = await runInTab(id, () => document.querySelector(".author-name-meta").textContent.trim());
 		title = await runInTab(id, () => document.querySelector(`[slot="title"]`).textContent.trim());
@@ -245,13 +293,13 @@ async function getQuote() {
 			...(author !== "[deleted]" && {author: `u/${author}`}),
 			title: formatText(title),
 			site: "w:Reddit",
-			url,
+			url: cleanUrl,
 			archiveurl,
 			archivedate,
 			location: `r/${subreddit}`,
 			date: formatDate(date),
 			passage: formatText(clipboardContents) || formatText(passage) || formatText(title)
-		}, "{{quote-web|en|");
+		}, `{{quote-book|${langcode || "en"}|`);
 	} else if (matchedUrl === "RedditPost") {
 		const author = await runInTab(id, () => document.querySelector(".author-name").textContent);
 		title = await runInTab(id, () => document.querySelector(`[slot="title"]`).textContent.trim());
@@ -267,13 +315,13 @@ async function getQuote() {
 			...(author !== "[deleted]" && {author: `u/${author}`}),
 			title: formatText(title),
 			site: "w:Reddit",
-			url,
+			url: cleanUrl,
 			archiveurl,
 			archivedate,
 			location: `r/${subreddit}`,
 			date: formatDate(date),
 			passage: formatText(clipboardContents) || formatText(passage) || formatText(title)
-		}, "{{quote-web|en|");
+		}, `{{quote-book|${langcode || "en"}|`);
 	} else {
 		const rq = new Map([
 			["https://www.theatlantic.com/#publisher", "Atlantic"],
@@ -308,12 +356,12 @@ async function getQuote() {
 			...consolidateAuthors(authors),
 			title: formatText(title),
 			...(!rq && {site: publisher}),
-			url,
+			url: cleanUrl,
 			archiveurl,
 			archivedate,
 			date: formatDate(date),
 			passage: formatText(clipboardContents) || formatText(title)
-		}, rq ? `{{RQ:${rq}|` : "{{quote-web|en|");
+		}, rq ? `{{RQ:${rq}|` : `{{quote-book|${langcode || "en"}|`);
 	}
 }
 
@@ -335,6 +383,7 @@ async function archive(currentTab) {
 	return [archiveurl, archivedate];
 }
 
+const button = document.querySelector("button");
 button.addEventListener("click", async () => {
 	try {
 		const quote = await getQuote();
@@ -348,4 +397,17 @@ button.addEventListener("click", async () => {
 		console.error(err);
 		alert(`An error occurred:\n${err.stack}`);
 	}
+});
+
+let langcode;
+
+const lang = document.querySelector("input");
+browserAPI.storage.sync.get(["language"], result => {
+	lang.value = result.language;
+	langcode = result.language;
+});
+
+lang.addEventListener("change", () => {
+	langcode = lang.value;
+	browserAPI.storage.sync.set({language: lang.value}, () => {});
 });
