@@ -280,7 +280,7 @@ async function getQuote() {
 			archivedate,
 			date: formatDate(date),
 			passage: formatText(passage)
-		}, `{{quote-book|${langcode || "en"}|`);
+		}, `{{quote-web|${langcode || "en"}|`);
 	} else if (matchedUrl === "RedditComment") {
 		const author = await runInTab(id, () => document.querySelector(".author-name-meta").textContent.trim());
 		title = await runInTab(id, () => document.querySelector(`[slot="title"]`).textContent.trim());
@@ -299,7 +299,7 @@ async function getQuote() {
 			location: `r/${subreddit}`,
 			date: formatDate(date),
 			passage: formatText(clipboardContents) || formatText(passage) || formatText(title)
-		}, `{{quote-book|${langcode || "en"}|`);
+		}, `{{quote-web|${langcode || "en"}|`);
 	} else if (matchedUrl === "RedditPost") {
 		const author = await runInTab(id, () => document.querySelector(".author-name").textContent);
 		title = await runInTab(id, () => document.querySelector(`[slot="title"]`).textContent.trim());
@@ -321,7 +321,7 @@ async function getQuote() {
 			location: `r/${subreddit}`,
 			date: formatDate(date),
 			passage: formatText(clipboardContents) || formatText(passage) || formatText(title)
-		}, `{{quote-book|${langcode || "en"}|`);
+		}, `{{quote-web|${langcode || "en"}|`);
 	} else {
 		const rq = new Map([
 			["https://www.theatlantic.com/#publisher", "Atlantic"],
@@ -361,7 +361,7 @@ async function getQuote() {
 			archivedate,
 			date: formatDate(date),
 			passage: formatText(clipboardContents) || formatText(title)
-		}, rq ? `{{RQ:${rq}|` : `{{quote-book|${langcode || "en"}|`);
+		}, rq ? `{{RQ:${rq}|` : `{{quote-web|${langcode || "en"}|`);
 	}
 }
 
