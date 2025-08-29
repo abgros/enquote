@@ -181,7 +181,7 @@ async function getQuote() {
 
 		return buildQuote({
 			...consolidateAuthors(metadata["author"].split("; ")),
-			title: metadata["title"],
+			...quoteKind === "journal" ? {work: metadata["title"]} : {title: metadata["title"]},
 			location: metadata["publication place"],
 			publisher: metadata["publisher"],
 			...(rawDate.match("^[0-9]{4}$") ? {year: rawDate} : {date: rawDate}),
@@ -211,7 +211,7 @@ async function getQuote() {
 
 		return buildQuote({
 			author: metadata["Autor"]?.split("(")[0].trim(),
-			title: formatText(title),
+			...quoteKind === "journal" ? {work: formatText(title)} : {title: formatText(title)},
 			date,
 			location: metadata["Miejsce wydania"],
 			publisher: titleCase(metadata["Wydawca"]),
