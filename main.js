@@ -6,14 +6,18 @@ const alwaysLower = ["and", "as", "but", "for", "if", "nor", "or", "so", "yet", 
 
 function titleCase(s) {
 	const parts = s.split(/\b/);
+
 	for (let i = 0; i < parts.length; i++) {
 		const isLowerCase = /^[a-z]{2,}$/.test(parts[i]);
-		// words in alwaysLower are exempt unless they are the first part
-		if (isLowerCase && (!alwaysLower.includes(parts[i]) || parts === 0)) {
-			parts[i] = parts[i].at(0).toUpperCase() + parts[i].substr(1);
+
+		// words in alwaysLower and non-English words are exempt
+		// exempt words aren't uppercased unless they're the first word
+		const exemptWord = alwaysLower.includes(parts[i]) || (langcode && langcode !== "en");
+
+		if (isLowerCase && (i === 0 || !exemptWord)) {
+			parts[i] = parts[i][0].toUpperCase() + parts[i].slice(1);
 		}
 	}
-
 	return parts.join("");
 }
 
@@ -189,9 +193,10 @@ async function getQuote() {
 		const workId = matchedUrlObj[1];
 
 		// janky hack to open the Informacje tab
-		if (url.includes("item-view") && await runInTab(id, () => !document.querySelector(".metadata-info-container-scroll"))) {
+		if (url.includes("item-view") && await runInTab(id, () => !document.querySelector(`[aria-label="Informacje"]`)))
+			await runInTab(id, () => document.querySelector("bn-viewer-side-button bn-icon").click());
+		if (url.includes("item-view") && await runInTab(id, () => !document.querySelector(".metadata-info-container-scroll")))
 			await runInTab(id, () => document.querySelector(`[aria-label="Informacje"]`).click());
-		}
 
 		const metadata = await runInTab(id, () => Object.fromEntries(
 			[...document.querySelectorAll("bn-object-metadata-item")].map(elem => {
@@ -200,20 +205,21 @@ async function getQuote() {
 			})
 		));
 		const title = await runInTab(id, () => document.querySelector(".title-section h2, h5").textContent);
-		const date = await runInTab(id, () => document.querySelector("h2 + div, h5 + h6").textContent);
+		const date = await runInTab(id, () => document.querySelector("h2 + div, h5 + h6").textContent.trim());
 		const page = await runInTab(id, () => document.querySelector("bn-viewer-page-select")?.textContent.match("karta \\[?([^|\\]]+)")[1].trim());
+		const quoteKind = metadata["Częstotliwość"] ? "journal" : "book";
 
 		return buildQuote({
-			author: metadata["Autor"].split("(")[0].trim(),
+			author: metadata["Autor"]?.split("(")[0].trim(),
 			title: formatText(title),
 			date,
 			location: metadata["Miejsce wydania"],
-			publisher: metadata["Wydawca"],
+			publisher: titleCase(metadata["Wydawca"]),
 			url: `https://polona.pl/preview/${workId}`,
 			page: page,
 			pageurl: page && url,
 			passage: formatText(clipboardContents) || formatText(title)
-		}, "{{quote-book|pl|");
+		}, `{{quote-${quoteKind}|pl|`);
 	}
 
 	// try to grab JSON-LD data
