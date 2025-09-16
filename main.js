@@ -354,6 +354,7 @@ async function getQuote() {
 			["The Wall Street Journal", "WSJ"],
 			["The Washington Post", "WaPo"],
 			["WIRED", "Wired"],
+			["The Hollywood Reporter", "Hollywood Reporter"],
 		]).get(publisher);
 
 		authors = authors.filter(author => author !== publisher);
@@ -409,7 +410,7 @@ let langcode;
 
 const lang = document.querySelector("input");
 browserAPI.storage.sync.get(["language"], result => {
-	lang.value = result.language;
+	lang.value = result.language || "";
 	langcode = result.language;
 });
 
