@@ -23,6 +23,7 @@ function titleCase(s) {
 
 // Format date as "DD Month YYYY" (e.g., "15 January 2024")
 function formatDate(dateStr) {
+	if (dateStr === "n.d.") return dateStr;
 	const date = new Date(dateStr);
 	const day = date.getUTCDate();
 	const month = date.toLocaleString("en-US", {month: "long", timeZone: "UTC"});
@@ -35,12 +36,10 @@ function formatText(str) {
 	return str.trim()
 		.replace(/\n\s+/g, " ¶ ")
 		.replace(/\s+/g, " ")
-		.replaceAll("|", "{{!}}")
-		.replaceAll("’", "'")
-		.replaceAll("‘", "'")
-		.replaceAll("”", "\"")
-		.replaceAll("“", "\"")
-		.replaceAll("…", "...");
+		.replace(/\||&#124;/g, "{{!}}")
+		.replace(/’|‘|&#8216;|&#8217;/g, "'")
+		.replace(/”|“|&#8220;|&#8221;/g, "\"")
+		.replace(/…|&#8230;/g, "...");
 }
 
 // Takes an array of authors and returns an object of author parameters
@@ -141,7 +140,7 @@ async function getQuote() {
 
 		const {authors, title, publishedDate, publisher, industryIdentifiers, subtitle} = data.volumeInfo;
 		const fullTitle = subtitle ? `${title}: ${subtitle}` : title;
-		console.log(data.volumeInfo);
+		console.log("[ENQUOTE]", data.volumeInfo);
 
 		let isbn;
 		if (industryIdentifiers) {
@@ -222,7 +221,7 @@ async function getQuote() {
 		}, `{{quote-${quoteKind}|pl|`);
 	}
 
-	// try to grab JSON-LD data
+	// Generic article: (1) try to grab JSON-LD data
 	let passage;
 	let [authors, date, title, publisher, gotJsonLD] = await runInTab(id, () => {
 		let gotJsonLD = false;
@@ -240,13 +239,15 @@ async function getQuote() {
 				if (Array.isArray(data))
 					data = data.find(jsonLdIsArticle);
 
-				console.log("JSON-LD data:", data);
+				console.log("[ENQUOTE] JSON-LD data:", data);
 
 				// ensure @type value is correct
 				if (!jsonLdIsArticle(data))
 					continue;
 
-				if (typeof data.author === "string")
+				if (!data.author) {
+					authors = [];
+				} else if (typeof data.author === "string")
 					authors = [data.author];
 				else if (typeof data.author.name === "string")
 					authors = [data.author.name];
@@ -257,19 +258,29 @@ async function getQuote() {
 
 				date = data.datePublished.split("T")[0];
 				title = data.headline;
-				publisher = data.publisher.name || data.publisher["@id"];
+				publisher = data.publisher?.name ?? data.publisher?.["@id"] ??
+					document.querySelector(`meta[property="og:site_name"]`)?.content ?? location.hostname;
 				gotJsonLD = true;
 				break;
 			} catch (e) {
-				console.log("JSON-LD parse error:", e.stack);
+				console.log("[ENQUOTE] JSON-LD parse error:", e.stack);
 			}
 		}
 
 		return [authors, date, title, publisher, gotJsonLD];
 	});
 
+	if (!matchedUrl && !gotJsonLD) {
+		// Generic article: (2) try to grab OpenGraph data
 
-	if (!matchedUrl && !gotJsonLD) return;
+		[authors, date, title, publisher] = await runInTab(id, () => {
+			let publisher = document.querySelector(`meta[property="og:site_name"]`)?.content ?? location.hostname;
+			let author = document.querySelector(`meta[name="author"]`)?.content;
+			let date = document.querySelector(`meta[property="article:published_time"]`)?.content.split("T")[0] || "n.d.";
+			let title = document.querySelector(`meta[property="og:title"]`)?.content ?? document.title;
+			return [[author], date, title, publisher];
+		});
+	}
 
 	const [archiveurl, archivedate] = await archive(currentTab);
 
