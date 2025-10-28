@@ -1,7 +1,7 @@
 {
 	"manifest_version": 3,
 	"name": "Enquote",
-	"version": "1.6",
+	"version": "1.7",
 	"description": "Quickly generate Wiktionary quotes",
 	"permissions": [
 		"activeTab",
@@ -10,9 +10,7 @@
 		"storage",
 		"clipboardRead"
 	],
-	"host_permissions": [
-		"https://archive.ph/*"
-	],
+	"host_permissions": ["https://archive.ph/*"],
 	"action": {
 		"default_popup": "main.html",
 		"default_icon": {
