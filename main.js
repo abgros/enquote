@@ -67,6 +67,15 @@ function buildQuote(obj, start) {
 	return "#* " + start + parts.join("|") + "}}";
 }
 
+function buildTwitterQuote(obj) {
+	const positional = [obj.langcode, obj.date, obj.author, obj.id, obj.passage];
+
+	var params = positional.join("|");
+	params += `|archiveurl=${obj.archiveurl}|archivedate=${obj.archivedate}`;
+
+	return "#* {{RQ:X|" + params + "}}";
+}
+
 async function getQuote() {
 	const [currentTab] = await browserAPI.tabs.query({active: true, currentWindow: true});
 	const url = currentTab.url;
@@ -77,7 +86,7 @@ async function getQuote() {
 
 	// Match different social media URLs
 	const urlPatterns = new Map([
-		["Twitter", /^https:\/\/x\.com\/([a-zA-Z0-9_]+)\/status\/[0-9]+$/],
+		["Twitter", /^https:\/\/x\.com\/([a-zA-Z0-9_]+)\/status\/([0-9]+)$/],
 		["RedditComment", /^https:\/\/www\.reddit\.com\/r\/([a-zA-Z0-9_]+)\/comments\/[a-z0-9]+\/comment\/[a-z0-9]+\/$/],
 		["RedditPost", /^https:\/\/www\.reddit\.com\/r\/([a-zA-Z0-9_]+)\/comments\//],
 		["InternetArchiveItem", /^https:\/\/archive\.org\/details\//],
@@ -286,18 +295,19 @@ async function getQuote() {
 
 	if (matchedUrl === "Twitter") {
 		const author = matchedUrlObj[1];
+		const post_id = matchedUrlObj[2];
 		date = await runInTab(id, () => document.querySelector(`[aria-label*=" · "] > time`).dateTime);
 		passage = await runInTab(id, () => document.querySelector(`article:has([aria-label*=" · "]) [data-testid="tweetText"]`)?.textContent ?? "");
 
-		return buildQuote({
-			author: `@${author}`,
-			site: "w:Twitter",
-			url: cleanUrl,
-			archiveurl,
+		return buildTwitterQuote({
+			author,
 			archivedate,
+			archiveurl,
 			date: formatDate(date),
-			passage: formatText(passage)
-		}, `{{quote-web|${langcode || "en"}|`);
+			id: post_id,
+			langcode: langcode ?? "en",
+			passage: formatText(passage),
+		})
 	} else if (matchedUrl === "RedditComment") {
 		const author = await runInTab(id, () => document.querySelector(".author-name-meta").textContent.trim());
 		title = await runInTab(id, () => document.querySelector(`[slot="title"]`).textContent.trim());
