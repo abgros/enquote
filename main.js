@@ -67,15 +67,6 @@ function buildQuote(obj, start) {
 	return "#* " + start + parts.join("|") + "}}";
 }
 
-function buildTwitterQuote(obj) {
-	const positional = [obj.langcode, obj.date, obj.author, obj.id, obj.passage];
-
-	var params = positional.join("|");
-	params += `|archiveurl=${obj.archiveurl}|archivedate=${obj.archivedate}`;
-
-	return "#* {{RQ:X|" + params + "}}";
-}
-
 async function getQuote() {
 	const [currentTab] = await browserAPI.tabs.query({active: true, currentWindow: true});
 	const url = currentTab.url;
@@ -294,20 +285,19 @@ async function getQuote() {
 	const [archiveurl, archivedate] = await archive(currentTab);
 
 	if (matchedUrl === "Twitter") {
-		const author = matchedUrlObj[1];
+		const handle = matchedUrlObj[1];
 		const post_id = matchedUrlObj[2];
 		date = await runInTab(id, () => document.querySelector(`[aria-label*=" · "] > time`).dateTime);
 		passage = await runInTab(id, () => document.querySelector(`article:has([aria-label*=" · "]) [data-testid="tweetText"]`)?.textContent ?? "");
 
-		return buildTwitterQuote({
-			author,
+		return buildQuote({
+			date: formatDate(date),
+			handle,
+			id: post_id,
+			passage: formatText(passage),
 			archivedate,
 			archiveurl,
-			date: formatDate(date),
-			id: post_id,
-			langcode: langcode ?? "en",
-			passage: formatText(passage),
-		})
+		}, `{{RQ:X|${langcode ?? "en"}|`)
 	} else if (matchedUrl === "RedditComment") {
 		const author = await runInTab(id, () => document.querySelector(".author-name-meta").textContent.trim());
 		title = await runInTab(id, () => document.querySelector(`[slot="title"]`).textContent.trim());
