@@ -339,7 +339,7 @@ async function getQuote() {
 			url: cleanUrl,
 			archiveurl,
 			archivedate,
-			location: `r/${subreddit}`,
+			subreddit,
 			date: formatDate(date),
 			passage: formatText(clipboardContents) || formatText(passage) || formatText(title)
 		}, `{{RQ:Reddit|${langcode || "en"}|`);
