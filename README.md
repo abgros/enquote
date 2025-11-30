@@ -23,10 +23,14 @@ You can install it on the Chrome web store [here](https://chromewebstore.google.
 5. Wait for the button to say "Copied!"
 6. Paste into Wiktionary
 
+### Notes
+- If you click away before the word "Copied!" appears, the extension closes and you'll have to re-run it. This is a limitation caused by the browser.
+- If the archive.ph tab stays open for a long time, it probably wants you to do a security check. Switch to the archive.ph tab, complete it, then come back and re-run the extension.
+
 ## Manual installation steps
 Publishing an update to the Chrome or Firefox web stores can take several days, so it may be behind
 the latest development version in terms of bug fixes and features. You can download the extension
-directly from Github [here](https://github.com/abgros/enquote/archive/refs/heads/master.zip); unzip the folder and install it as described below:
+directly from Github [here](https://github.com/abgros/enquote/archive/refs/heads/master.zip); unzip the folder and install it as follows:
 
 **Chrome:**
 1. Go to `chrome://extensions/`
