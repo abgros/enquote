@@ -1,7 +1,7 @@
 {
 	"manifest_version": 3,
 	"name": "Enquote",
-	"version": "1.7",
+	"version": "1.8",
 	"description": "Quickly generate Wiktionary quotes",
 	"permissions": [
 		"activeTab",

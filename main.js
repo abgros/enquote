@@ -21,9 +21,11 @@ function titleCase(s) {
 	return parts.join("");
 }
 
+const NO_DATE_SENTINEL = "<enquote failed to detect date>";
+
 // Format date as "DD Month YYYY" (e.g., "15 January 2024")
 function formatDate(dateStr) {
-	if (dateStr === "n.d.") return dateStr;
+	if (dateStr === NO_DATE_SENTINEL) return dateStr;
 	const date = new Date(dateStr);
 	const day = date.getUTCDate();
 	const month = date.toLocaleString("en-US", {month: "long", timeZone: "UTC"});
@@ -77,9 +79,10 @@ async function getQuote() {
 
 	// Match different social media URLs
 	const urlPatterns = new Map([
-		["Twitter", /^https:\/\/x\.com\/([a-zA-Z0-9_]+)\/status\/([0-9]+)$/],
+		["Twitter", /^https:\/\/x\.com\/([a-zA-Z0-9_]+)\/status\/([0-9]+)/],
 		["RedditComment", /^https:\/\/www\.reddit\.com\/r\/([a-zA-Z0-9_]+)\/comments\/[a-z0-9]+\/comment\/[a-z0-9]+\/$/],
 		["RedditPost", /^https:\/\/www\.reddit\.com\/r\/([a-zA-Z0-9_]+)\/comments\//],
+		["Bluesky", /^https:\/\/bsky\.app\/profile\/([^\/]+)\/post\/([^\/]+)/],
 		["InternetArchiveItem", /^https:\/\/archive\.org\/details\//],
 		["GoogleBooks", /^https:\/\/www\.google\.[a-z]+\/books\/edition\/[^/]+\/([a-zA-Z0-9-_]+)/],
 		["NationalCorpusOfPolish", /^https:\/\/nkjp\.pl\/poliqarp\/[a-z0-9-]+\/query\/\d+\/$/],
@@ -107,14 +110,17 @@ async function getQuote() {
 		publisher = publisher ?? "";
 		isbn = Array.isArray(isbn) ? isbn[0] : isbn;
 
-		// try to extract page parameters
-		const page = cleanUrl.match(/\/page\/(n?[0-9]+)\/mode\//)?.[1] ?? await runInTab(id, () => {
+		// Extract searched pages from sidebar
+		// Heuristic: if only one page is searched, use that, otherwise try reading the URL
+		const pagesSearched = await runInTab(id, () => {
 			// IA uses a lot of shadow roots
 			const getRoots = e => [e, ...e.querySelectorAll("*")].filter(e => e.shadowRoot).flatMap(e => [e.shadowRoot, ...getRoots(e.shadowRoot)]);
-			const pageNum = getRoots(document).flatMap(r => [...r.querySelectorAll(".page-num")])[0];
-			return pageNum.textContent.replace("Page ", "");
+			return getRoots(document).flatMap(
+				r => [...r.querySelectorAll(".page-num")].map(el => el.textContent.replace("Page ", ""))
+			);
 		});
 
+		const page = pagesSearched.length === 1 ? pagesSearched[0] : cleanUrl.match(/\/page\/(n?[0-9]+)\/mode\//)?.[1];
 		const pageurl = page ? `https://archive.org/details/${identifier}/page/${page}/mode/1up` : "";
 
 		const [locationPart, publisherPart] = publisher.includes(" : ") ? publisher.split(" : ") : ["", publisher];
@@ -276,7 +282,7 @@ async function getQuote() {
 		[authors, date, title, publisher] = await runInTab(id, () => {
 			let publisher = document.querySelector(`meta[property="og:site_name"]`)?.content ?? location.hostname;
 			let author = document.querySelector(`meta[name="author"]`)?.content;
-			let date = document.querySelector(`meta[property="article:published_time"]`)?.content.split("T")[0] || "n.d.";
+			let date = document.querySelector(`meta[property="article:published_time"]`)?.content.split("T")[0] || NO_DATE_SENTINEL;
 			let title = document.querySelector(`meta[property="og:title"]`)?.content ?? document.title;
 			return [[author], date, title, publisher];
 		});
@@ -291,13 +297,13 @@ async function getQuote() {
 		passage = await runInTab(id, () => document.querySelector(`article:has([aria-label*=" · "]) [data-testid="tweetText"]`)?.textContent ?? "");
 
 		return buildQuote({
-			date: formatDate(date),
 			handle,
 			id: post_id,
-			passage: formatText(passage),
+			date: formatDate(date),
 			archivedate,
 			archiveurl,
-		}, `{{RQ:X|${langcode ?? "en"}|`)
+			passage: formatText(passage),
+		}, `{{RQ:X|${langcode ?? "en"}|`);
 	} else if (matchedUrl === "RedditComment") {
 		const author = await runInTab(id, () => document.querySelector(".author-name-meta").textContent.trim());
 		title = await runInTab(id, () => document.querySelector(`[slot="title"]`).textContent.trim());
@@ -307,16 +313,15 @@ async function getQuote() {
 		const subreddit = matchedUrlObj[1];
 
 		return buildQuote({
-			...(author !== "[deleted]" && {author: `u/${author}`}),
+			...(author !== "[deleted]" && {author}),
 			title: formatText(title),
-			site: "w:Reddit",
 			url: cleanUrl,
 			archiveurl,
 			archivedate,
-			location: `r/${subreddit}`,
+			subreddit,
 			date: formatDate(date),
 			passage: formatText(clipboardContents) || formatText(passage) || formatText(title)
-		}, `{{quote-web|${langcode || "en"}|`);
+		}, `{{RQ:Reddit|${langcode || "en"}|`);
 	} else if (matchedUrl === "RedditPost") {
 		const author = await runInTab(id, () => document.querySelector(".author-name").textContent);
 		title = await runInTab(id, () => document.querySelector(`[slot="title"]`).textContent.trim());
@@ -329,16 +334,36 @@ async function getQuote() {
 		const subreddit = matchedUrlObj[1];
 
 		return buildQuote({
-			...(author !== "[deleted]" && {author: `u/${author}`}),
+			...(author !== "[deleted]" && {author}),
 			title: formatText(title),
-			site: "w:Reddit",
 			url: cleanUrl,
 			archiveurl,
 			archivedate,
 			location: `r/${subreddit}`,
 			date: formatDate(date),
 			passage: formatText(clipboardContents) || formatText(passage) || formatText(title)
-		}, `{{quote-web|${langcode || "en"}|`);
+		}, `{{RQ:Reddit|${langcode || "en"}|`);
+	} else if (matchedUrl === "Bluesky") {
+		const handle = matchedUrlObj[1];
+		const post_id = matchedUrlObj[2];
+		const [date, passage] = await runInTab(id, () => {
+			const noscript = document.querySelector("noscript");
+			const noScriptTree = document.createRange().createContextualFragment(noscript.textContent);
+
+			const date = noScriptTree.querySelector("#bsky_post_indexedat").textContent.split("T")[0]
+			const passage = noScriptTree.querySelector("#bsky_post_text").textContent;
+
+			return [date, passage];
+		});
+
+		return buildQuote({
+			handle,
+			id: post_id,
+			date: formatDate(date),
+			archivedate,
+			archiveurl,
+			passage: formatText(passage),
+		}, `{{RQ:Bluesky|${langcode ?? "en"}|`);
 	} else {
 		const rq = new Map([
 			["https://www.theatlantic.com/#publisher", "Atlantic"],
@@ -374,7 +399,10 @@ async function getQuote() {
 			...consolidateAuthors(authors),
 			title: formatText(title),
 			...(!rq && {site: publisher}),
-			url: cleanUrl,
+			// don't use the cleaned url out of an abundance of caution,
+			// unless the site is known good (i.e. in the RQ list);
+			// example case: https://www.theinterrobang.ca/article?aID=17461
+			url: rq ? cleanUrl : url,
 			archiveurl,
 			archivedate,
 			date: formatDate(date),
