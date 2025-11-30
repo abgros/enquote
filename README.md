@@ -6,6 +6,7 @@ A browser extension that generates Wiktionary quotes from various sites.
 - Most news sites
 - Reddit
 - Twitter
+- Bluesky
 - archive.org (books)
 - Google Books
 - nkjp.pl
@@ -16,7 +17,7 @@ You can install it on the Chrome web store [here](https://chromewebstore.google.
 ## Usage
 
 1. Go to a supported website
-2. Make sure you have the passage copied to your clipboard (not necessary for: Twitter, nkjp.pl)
+2. Make sure you have the passage copied to your clipboard (not necessary for: Twitter, Bluesky, nkjp.pl)
 3. Click the extension icon
 4. Click "Quote"
 5. Wait for the button to say "Copied!"
