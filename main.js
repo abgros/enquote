@@ -77,7 +77,7 @@ async function getQuote() {
 
 	// Match different social media URLs
 	const urlPatterns = new Map([
-		["Twitter", /^https:\/\/x\.com\/([a-zA-Z0-9_]+)\/status\/[0-9]+$/],
+		["Twitter", /^https:\/\/x\.com\/([a-zA-Z0-9_]+)\/status\/([0-9]+)$/],
 		["RedditComment", /^https:\/\/www\.reddit\.com\/r\/([a-zA-Z0-9_]+)\/comments\/[a-z0-9]+\/comment\/[a-z0-9]+\/$/],
 		["RedditPost", /^https:\/\/www\.reddit\.com\/r\/([a-zA-Z0-9_]+)\/comments\//],
 		["InternetArchiveItem", /^https:\/\/archive\.org\/details\//],
@@ -285,19 +285,19 @@ async function getQuote() {
 	const [archiveurl, archivedate] = await archive(currentTab);
 
 	if (matchedUrl === "Twitter") {
-		const author = matchedUrlObj[1];
+		const handle = matchedUrlObj[1];
+		const post_id = matchedUrlObj[2];
 		date = await runInTab(id, () => document.querySelector(`[aria-label*=" · "] > time`).dateTime);
 		passage = await runInTab(id, () => document.querySelector(`article:has([aria-label*=" · "]) [data-testid="tweetText"]`)?.textContent ?? "");
 
 		return buildQuote({
-			author: `@${author}`,
-			site: "w:Twitter",
-			url: cleanUrl,
-			archiveurl,
-			archivedate,
 			date: formatDate(date),
-			passage: formatText(passage)
-		}, `{{quote-web|${langcode || "en"}|`);
+			handle,
+			id: post_id,
+			passage: formatText(passage),
+			archivedate,
+			archiveurl,
+		}, `{{RQ:X|${langcode ?? "en"}|`)
 	} else if (matchedUrl === "RedditComment") {
 		const author = await runInTab(id, () => document.querySelector(".author-name-meta").textContent.trim());
 		title = await runInTab(id, () => document.querySelector(`[slot="title"]`).textContent.trim());
