@@ -288,6 +288,21 @@ async function getQuote() {
 		});
 	}
 
+	// In Bluesky, the scraped data gets stale when you navigate to a new page
+	// We can check for this by comparing the HTML's "canonical" URL to the current URL
+	if (matchedUrl === "Bluesky") {
+		let needsReload = await runInTab(id, () => {
+			const canonicalUrl = document.querySelector(`link[rel="canonical"]`).href;
+			if (location.href.split("?")[0] !== canonicalUrl) {
+				if (confirm("Enquote needs to reload this page to scrape it. Continue?")) {
+					location.reload();
+					return true;
+				}
+			}
+		});
+		if (needsReload) return;
+	}
+
 	const [archiveurl, archivedate] = await archive(currentTab);
 
 	if (matchedUrl === "Twitter") {
@@ -346,6 +361,7 @@ async function getQuote() {
 	} else if (matchedUrl === "Bluesky") {
 		const handle = matchedUrlObj[1];
 		const post_id = matchedUrlObj[2];
+
 		const [date, passage] = await runInTab(id, () => {
 			const noscript = document.querySelector("noscript");
 			const noScriptTree = document.createRange().createContextualFragment(noscript.textContent);
