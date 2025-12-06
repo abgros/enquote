@@ -1,0 +1,84 @@
+:root {
+  --bg: oklch(99% 0.01 240);
+  --fg: oklch(20% 0.02 260);
+
+  --input-border: oklch(80% 0.03 240);
+  --input-focus-border: oklch(65% 0.12 250);
+  --input-focus-shadow: oklch(75% 0.15 250 / 0.35);
+
+  --button-bg: oklch(65% 0.18 255);
+  --button-hover: oklch(60% 0.18 255);
+  --button-active: oklch(50% 0.18 255);
+  --button-fg: oklch(98% 0.01 240);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: oklch(18% 0.02 240);
+    --fg: oklch(92% 0.01 240);
+
+    --input-border: oklch(40% 0.03 240);
+    --input-focus-border: oklch(70% 0.13 250);
+    --input-focus-shadow: oklch(70% 0.15 250 / 0.4);
+
+    --button-bg: oklch(72% 0.18 255);
+    --button-hover: oklch(66% 0.18 255);
+    --button-active: oklch(58% 0.18 255);
+    --button-fg: oklch(98% 0.01 240);
+  }
+}
+
+body {
+  margin: 20px;
+  font-family: system-ui, sans-serif;
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+  gap: 12px;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+img {
+  height: 40px;
+  width: auto;
+}
+
+button {
+  padding: 8px 14px;
+  font-size: 14px;
+  border: none;
+  border-radius: 6px;
+  background: var(--button-bg);
+  color: var(--button-fg);
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+button:hover {
+  background: var(--button-hover);
+}
+
+button:active {
+  background: var(--button-active);
+}
+
+span {
+  font-size: 14px;
+}
+
+input[type="text"] {
+  padding: 4px 6px;
+  font-size: 14px;
+  width: 32px;
+  border: 1px solid var(--input-border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+input[type="text"]:focus {
+  outline: none;
+  border-color: var(--input-focus-border);
+  box-shadow: 0 0 0 2px var(--input-focus-shadow);
+}
