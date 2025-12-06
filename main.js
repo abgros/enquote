@@ -280,9 +280,10 @@ async function getQuote() {
 		// Generic article: (2) try to grab OpenGraph data
 
 		[authors, date, title, publisher] = await runInTab(id, () => {
+			const NO_DATE_SENTINEL = "<enquote failed to detect date>";
 			let publisher = document.querySelector(`meta[property="og:site_name"]`)?.content ?? location.hostname;
 			let author = document.querySelector(`meta[name="author"]`)?.content;
-			let date = document.querySelector(`meta[property="article:published_time"]`)?.content.split("T")[0] || NO_DATE_SENTINEL;
+			let date = document.querySelector(`meta[property="article:published_time"]`)?.content?.split("T")[0] || NO_DATE_SENTINEL;
 			let title = document.querySelector(`meta[property="og:title"]`)?.content ?? document.title;
 			return [[author], date, title, publisher];
 		});
