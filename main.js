@@ -1,4 +1,4 @@
-import {runInTab, browserAPI} from "./utils.js";
+import { runInTab, browserAPI } from "./utils.js";
 
 // https://apastyle.apa.org/style-grammar-guidelines/capitalization/title-case
 const alwaysLower = ["and", "as", "but", "for", "if", "nor", "or", "so", "yet", "a", "an",
@@ -25,10 +25,10 @@ const NO_DATE_SENTINEL = "<enquote failed to detect date>";
 
 // Format date as "DD Month YYYY" (e.g., "15 January 2024")
 function formatDate(dateStr) {
-	if (dateStr === NO_DATE_SENTINEL) return dateStr;
+	if (dateStr === "" || dateStr === NO_DATE_SENTINEL) return NO_DATE_SENTINEL;
 	const date = new Date(dateStr);
 	const day = date.getUTCDate();
-	const month = date.toLocaleString("en-US", {month: "long", timeZone: "UTC"});
+	const month = date.toLocaleString("en-US", { month: "long", timeZone: "UTC" });
 	const year = date.getUTCFullYear();
 	return `${day} ${month} ${year}`;
 }
@@ -70,23 +70,25 @@ function buildQuote(obj, start) {
 }
 
 async function getQuote() {
-	const [currentTab] = await browserAPI.tabs.query({active: true, currentWindow: true});
+	const [currentTab] = await browserAPI.tabs.query({ active: true, currentWindow: true });
 	const url = currentTab.url;
 	const cleanUrl = url.split("?")[0]; // Remove query parameters
 	const urlQuery = new URLSearchParams(url);
 	const id = currentTab.id;
 	const clipboardContents = await navigator.clipboard.readText();
 
-	// Match different social media URLs
+	// Regex corresponding to each case that the code can specially handle
 	const urlPatterns = new Map([
 		["Twitter", /^https:\/\/x\.com\/([a-zA-Z0-9_]+)\/status\/([0-9]+)/],
-		["RedditComment", /^https:\/\/www\.reddit\.com\/r\/([a-zA-Z0-9_]+)\/comments\/[a-z0-9]+\/comment\/[a-z0-9]+\/$/],
+		["RedditComment", /^https:\/\/www\.reddit\.com\/r\/([a-zA-Z0-9_]+)\/comments\/[a-z0-9]+\/comment\/([a-z0-9]+)\/$/],
 		["RedditPost", /^https:\/\/www\.reddit\.com\/r\/([a-zA-Z0-9_]+)\/comments\//],
 		["Bluesky", /^https:\/\/bsky\.app\/profile\/([^\/]+)\/post\/([^\/]+)/],
 		["InternetArchiveItem", /^https:\/\/archive\.org\/details\//],
 		["GoogleBooks", /^https:\/\/www\.google\.[a-z]+\/books\/edition\/[^/]+\/([a-zA-Z0-9-_]+)/],
 		["NationalCorpusOfPolish", /^https:\/\/nkjp\.pl\/poliqarp\/[a-z0-9-]+\/query\/\d+\/$/],
-		["Polona", /^https:\/\/polona\.pl\/(?:preview|item-view)\/([^/]+)/]
+		["Polona", /^https:\/\/polona\.pl\/(?:preview|item-view)\/([^/]+)/],
+		["GoogleUsenet", /https:\/\/groups\.google\.com\/g\/([^/]+)\/c\/([^/]+)\/m\//],
+		["IJPPAN", /https:\/\/spjs\.ijppan\.pl\/haslo\/index\/[0-9]+\/[0-9]+/]
 	]);
 
 	let matchedUrl, matchedUrlObj;
@@ -106,7 +108,7 @@ async function getQuote() {
 			return;
 		}
 		const data = await runInTab(id, () => JSON.parse(document.querySelector(".js-ia-metadata").value));
-		let {identifier, title, year, date, publisher, creator, isbn} = data.metadata;
+		let { identifier, title, year, date, publisher, creator, isbn } = data.metadata;
 		publisher = publisher ?? "";
 		isbn = Array.isArray(isbn) ? isbn[0] : isbn;
 
@@ -144,7 +146,7 @@ async function getQuote() {
 		const apiUrl = `https://www.googleapis.com/books/v1/volumes/${volumeId}`;
 		const data = await fetch(apiUrl).then(resp => resp.json());
 
-		const {authors, title, publishedDate, publisher, industryIdentifiers, subtitle} = data.volumeInfo;
+		const { authors, title, publishedDate, publisher, industryIdentifiers, subtitle } = data.volumeInfo;
 		const fullTitle = subtitle ? `${title}: ${subtitle}` : title;
 		console.log("[ENQUOTE]", data.volumeInfo);
 
@@ -186,10 +188,10 @@ async function getQuote() {
 
 		return buildQuote({
 			...consolidateAuthors(metadata["author"].split("; ")),
-			...quoteKind === "journal" ? {work: metadata["title"]} : {title: metadata["title"]},
+			...quoteKind === "journal" ? { work: metadata["title"] } : { title: metadata["title"] },
 			location: metadata["publication place"],
 			publisher: metadata["publisher"],
-			...(rawDate.match("^[0-9]{4}$") ? {year: rawDate} : {date: rawDate}),
+			...(rawDate.match("^[0-9]{4}$") ? { year: rawDate } : { date: rawDate }),
 			issn: metadata["ISSN"],
 			isbn: metadata["ISBN"],
 			passage: `{{...}} ${formatText(passage)} {{...}}`,
@@ -216,7 +218,7 @@ async function getQuote() {
 
 		return buildQuote({
 			author: metadata["Autor"]?.split("(")[0].trim(),
-			...quoteKind === "journal" ? {work: formatText(title)} : {title: formatText(title)},
+			...quoteKind === "journal" ? { work: formatText(title) } : { title: formatText(title) },
 			date,
 			location: metadata["Miejsce wydania"],
 			publisher: titleCase(metadata["Wydawca"]),
@@ -225,6 +227,49 @@ async function getQuote() {
 			pageurl: page && url,
 			passage: formatText(clipboardContents) || formatText(title)
 		}, `{{quote-${quoteKind}|pl|`);
+	} else if (matchedUrl === "GoogleUsenet") {
+		const newsgroup = matchedUrlObj[1];
+		const postId = matchedUrlObj[2];
+		// Use the first expanded comment as a proxy for which one is of interest
+		const commentId = await runInTab(id, () => document.querySelector("section[aria-expanded=true]").dataset.docId);
+		const author = await runInTab(id, () => document.querySelector(`section[aria-expanded=true] h3`).textContent);
+		const date = await runInTab(id, () => document.querySelector("section[aria-expanded=true] .zX2W9c").textContent);
+		const title = await runInTab(id, () => document.querySelector("h1 html-blob").textContent);
+
+		return buildQuote({
+			author,
+			date: formatDate(date),
+			newsgroup,
+			title,
+			url: `https://groups.google.com/g/${newsgroup}/c/${postId}/m/${commentId}`,
+			passage: formatText(clipboardContents)
+		}, `{{quote-newsgroup|${langcode || "en"}|`);
+	} else if (matchedUrl === "IJPPAN") {
+		return await runInTab(id, () => {
+			const detailsTable = new Map([...document.querySelectorAll("#yw1 tr")].map(
+				elem => [elem.querySelector("th").textContent, elem.querySelector("td")]
+			));
+			const locationPart = detailsTable.get("Lokalizacja").textContent.replaceAll(".", "").replaceAll(" ", "|").trim();
+			const datePart = detailsTable.get("Przykładw transkrypcji").lastElementChild.textContent.trim();
+
+			const translitElem = detailsTable.get("Przykładw transliteracji");
+			let translitText = "";
+			for (let i = 0; i < translitElem.childNodes.length - 1; i++) {
+				const node = translitElem.childNodes[i];
+				translitText += node.tagName === "U" ? `'''${node.textContent}'''` : node.textContent;
+			}
+			translitText = translitText.split(" ").map(word => word.includes("'''") ? `'''${word.replaceAll("'''", "")}'''` : word).join(" ").trim();
+
+			const transcripElem = detailsTable.get("Przykładw transkrypcji");
+			let transcripText = "";
+			for (let i = 0; i < transcripElem.childNodes.length - 1; i++) {
+				const node = transcripElem.childNodes[i];
+				transcripText += node.tagName === "U" ? `'''${node.textContent}'''` : node.textContent;
+			}
+			transcripText = transcripText.split(" ").map(word => word.includes("'''") ? `'''${word.replaceAll("'''", "")}'''` : word).join(" ").trim();
+
+			return `#* {{RQ:zlw-opl:${locationPart}|${datePart}|${translitText}|${transcripText}|-}}`;
+		});
 	}
 
 	// Generic article: (1) try to grab JSON-LD data
@@ -321,15 +366,16 @@ async function getQuote() {
 			passage: formatText(passage),
 		}, `{{RQ:X|${langcode ?? "en"}|`);
 	} else if (matchedUrl === "RedditComment") {
-		const author = await runInTab(id, () => document.querySelector(".author-name-meta").textContent.trim());
+		const commentSel = `shreddit-comment[permalink*="${matchedUrlObj[2]}"]`
+		const author = await runInTab(id, sel => document.querySelector(`${sel} .author-name-meta`).textContent.trim(), [commentSel]);
 		title = await runInTab(id, () => document.querySelector(`[slot="title"]`).textContent.trim());
-		date = formatDate(await runInTab(id, () => document.querySelector(`[slot="commentMeta"] time`).dateTime));
-		passage = await runInTab(id, () => document.querySelector(`[slot="comment"] > div`).textContent);
+		date = await runInTab(id, sel => document.querySelector(`${sel} [slot="commentMeta"] time`).dateTime, [commentSel]);
+		passage = await runInTab(id, sel => document.querySelector(`${sel} [slot="comment"] > div`).textContent, [commentSel]);
 
 		const subreddit = matchedUrlObj[1];
 
 		return buildQuote({
-			...(author !== "[deleted]" && {author}),
+			...(author !== "[deleted]" && { author }),
 			title: formatText(title),
 			url: cleanUrl,
 			archiveurl,
@@ -350,7 +396,7 @@ async function getQuote() {
 		const subreddit = matchedUrlObj[1];
 
 		return buildQuote({
-			...(author !== "[deleted]" && {author}),
+			...(author !== "[deleted]" && { author }),
 			title: formatText(title),
 			url: cleanUrl,
 			archiveurl,
@@ -415,7 +461,7 @@ async function getQuote() {
 		return buildQuote({
 			...consolidateAuthors(authors),
 			title: formatText(title),
-			...(!rq && {site: publisher}),
+			...(!rq && { site: publisher }),
 			// don't use the cleaned url out of an abundance of caution,
 			// unless the site is known good (i.e. in the RQ list);
 			// example case: https://www.theinterrobang.ca/article?aID=17461
@@ -431,16 +477,16 @@ async function getQuote() {
 // Archive the current page and return archive URL and date
 async function archive(currentTab) {
 	const url = currentTab.url.split("?")[0];
-	const archiveSubmit = `https://archive.ph/submit/?url=${encodeURIComponent(url)}`;
+	const archiveSubmit = "https://ghostarchive.org/";
 
 	// Create a new browser tab next to the current one
-	const tab = await browserAPI.tabs.create({url: archiveSubmit, index: currentTab.index + 1, active: false});
+	const tab = await browserAPI.tabs.create({ url: archiveSubmit, index: currentTab.index + 1, active: false });
 
 	// Wait for the tab to redirect to its final archiveurl, then close it
-	const archiveResult = await browserAPI.runtime.sendMessage({type: "wait_for_archiveurl", tabId: tab.id});
+	const archiveResult = await browserAPI.runtime.sendMessage({ type: "wait_for_archiveurl", tabId: tab.id, url });
 	await browserAPI.tabs.remove(tab.id);
 
-	const {archiveurl, isoDate} = archiveResult;
+	const { archiveurl, isoDate } = archiveResult;
 	const archivedate = formatDate(isoDate);
 
 	return [archiveurl, archivedate];
@@ -472,5 +518,5 @@ browserAPI.storage.sync.get(["language"], result => {
 
 lang.addEventListener("change", () => {
 	langcode = lang.value;
-	browserAPI.storage.sync.set({language: lang.value}, () => {});
+	browserAPI.storage.sync.set({ language: lang.value }, () => { });
 });
