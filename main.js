@@ -39,7 +39,7 @@ function formatText(str) {
 		.replace(/\n\s+/g, " ¶ ")
 		.replace(/\s+/g, " ")
 		.replace(/\||&#124;/g, "{{!}}")
-		.replace(/’|‘|&#8216;|&#8217;/g, "'")
+		.replace(/’|‘|&#8216;|&#8217;|&apos;/g, "'")
 		.replace(/”|“|&#8220;|&#8221;/g, "\"")
 		.replace(/…|&#8230;/g, "...");
 }
@@ -143,23 +143,20 @@ async function getQuote() {
 	} else if (matchedUrl === "GoogleBooks") {
 		// call into the Google Books API
 		const volumeId = matchedUrlObj[1];
-		const apiUrl = `https://www.googleapis.com/books/v1/volumes/${volumeId}`;
-		const data = await fetch(apiUrl).then(resp => resp.json());
 
-		const { authors, title, publishedDate, publisher, industryIdentifiers, subtitle } = data.volumeInfo;
+		// Scrape data
+		const data = new Map(await runInTab(id, () => [...document.querySelectorAll(`.r0Sd2e.lbS8Qd.RapeG.W6Xm5b .wDYxhc[role="presentation"]`)].map(
+			elem => [elem.querySelector(".w8qArf").firstChild.textContent, elem.querySelector(".kno-fv").textContent]
+		)));
+
+		const title = await runInTab(id, () => document.querySelector(".qVk57b").textContent);
+		const subtitle = await runInTab(id, () => document.querySelector(".wwNwqf").textContent);
 		const fullTitle = subtitle ? `${title}: ${subtitle}` : title;
-		console.log("[ENQUOTE]", data.volumeInfo);
-
-		let isbn;
-		if (industryIdentifiers) {
-			const isbn13 = industryIdentifiers.find(ident => ident.type === "ISBN_13");
-			if (isbn13) {
-				isbn = isbn13.identifier;
-			} else {
-				const isbn10 = industryIdentifiers.find(ident => ident.type === "ISBN_10");
-				isbn = isbn10 ? isbn10.identifier : "";
-			}
-		}
+		
+		const isbn = data.get("ISBN") ? data.get("ISBN").split(",")[0] : "";
+		const authors = data.get("Author") ? data.get("Author").split(", ") : [];
+		const publisher = data.get("Publisher");
+		const publishedDate = data.get("Published");
 
 		const pageParam = urlQuery.get("pg") ?? "";
 		const page = pageParam.match(/\d+/) ? pageParam.match(/\d+/)[0] : "";
