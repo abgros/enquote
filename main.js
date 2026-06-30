@@ -88,7 +88,7 @@ async function getQuote() {
 		["NationalCorpusOfPolish", /^https:\/\/nkjp\.pl\/poliqarp\/[a-z0-9-]+\/query\/\d+\/$/],
 		["Polona", /^https:\/\/polona\.pl\/(?:preview|item-view)\/([^/]+)/],
 		["GoogleUsenet", /https:\/\/groups\.google\.com\/g\/([^/]+)\/c\/([^/]+)\/m\//],
-		["IJPPAN", /https:\/\/spjs\.ijppan\.pl\/haslo\/index\/[0-9]+\/[0-9]+/]
+		["IJPPAN", /https:\/\/spjs\.ijppan\.pl\/haslo\/index\/[0-9]+/]
 	]);
 
 	let matchedUrl, matchedUrlObj;
@@ -152,7 +152,7 @@ async function getQuote() {
 		const title = await runInTab(id, () => document.querySelector(".qVk57b").textContent);
 		const subtitle = await runInTab(id, () => document.querySelector(".wwNwqf").textContent);
 		const fullTitle = subtitle ? `${title}: ${subtitle}` : title;
-		
+
 		const isbn = data.get("ISBN") ? data.get("ISBN").split(",")[0] : "";
 		const authors = data.get("Author") ? data.get("Author").split(", ") : [];
 		const publisher = data.get("Publisher");
@@ -246,26 +246,48 @@ async function getQuote() {
 			const detailsTable = new Map([...document.querySelectorAll("#yw1 tr")].map(
 				elem => [elem.querySelector("th").textContent, elem.querySelector("td")]
 			));
-			const locationPart = detailsTable.get("Lokalizacja").textContent.replaceAll(".", "").replaceAll(" ", "|").trim();
-			const datePart = detailsTable.get("Przykładw transkrypcji").lastElementChild.textContent.trim();
+			const locationText = detailsTable.get("Lokalizacja").textContent.replaceAll(".", "");
+			const locationPart = locationText.split(" ").filter(part => part !== "nr").join("|");
+
+			// The date may or may not be present.
+			const lastElem = detailsTable.get("Przykładw transkrypcji").lastElementChild;
+			const datePart = lastElem.tagName === "I" ? `|${lastElem.textContent.trim()}` : "";
 
 			const translitElem = detailsTable.get("Przykładw transliteracji");
 			let translitText = "";
-			for (let i = 0; i < translitElem.childNodes.length - 1; i++) {
-				const node = translitElem.childNodes[i];
+			for (const node of translitElem.childNodes) {
+				if (node.tagName === "I") continue;
 				translitText += node.tagName === "U" ? `'''${node.textContent}'''` : node.textContent;
 			}
-			translitText = translitText.split(" ").map(word => word.includes("'''") ? `'''${word.replaceAll("'''", "")}'''` : word).join(" ").trim();
 
 			const transcripElem = detailsTable.get("Przykładw transkrypcji");
 			let transcripText = "";
-			for (let i = 0; i < transcripElem.childNodes.length - 1; i++) {
-				const node = transcripElem.childNodes[i];
+			for (const node of transcripElem.childNodes) {
+				if (node.tagName === "I") continue;
 				transcripText += node.tagName === "U" ? `'''${node.textContent}'''` : node.textContent;
 			}
-			transcripText = transcripText.split(" ").map(word => word.includes("'''") ? `'''${word.replaceAll("'''", "")}'''` : word).join(" ").trim();
 
-			return `#* {{RQ:zlw-opl:${locationPart}|${datePart}|${translitText}|${transcripText}|-}}`;
+			function cleanBolding(s) {
+				let bolding = false;
+				let out = "";
+				for (const word of s.split(" ")) {
+					const hasBold = word.includes("'''");
+					if (bolding && hasBold) {
+						out += ` ${word.replaceAll("'''", "")}`;
+					} else if (bolding && !hasBold) {
+						out += ` ${word}'''`;
+						bolding = false;
+					} else if (!bolding && hasBold) {
+						bolding = true;
+						out += ` '''${word}`;
+					} else {
+						out += ` ${word}`;
+					}
+				}
+				return s.trim();
+			}
+
+			return `#* {{RQ:zlw-opl:${locationPart}${datePart}|${cleanBolding(translitText)}|${cleanBolding(transcripText)}|-}}`;
 		});
 	}
 
